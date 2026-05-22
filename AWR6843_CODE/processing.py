@@ -335,16 +335,20 @@ def velocity_filter(obj):
         return np.empty((0, 6), dtype = float)  # 빈 배열 반환 (5는 객체의 속성 수)
     
     if isinstance(obj[0], dict): # 이 변수의 자료형이 맞는지 검사하는 코드
+        obj = [item for item in obj if not item.get("lost", False)]
+        if not obj:
+            return np.empty((0, 6), dtype=float)
+
         obj = np.array([
             [
-                float(obj[i]["track_id"]),
-                float(obj[i]["x"]),      
-                float(obj[i]["y"]),
-                float(obj[i]["z"]),
-                float(obj[i]["v"]),
-                float(obj[i]["distance"])
+                float(item["track_id"]),
+                float(item["x"]),
+                float(item["y"]),
+                float(item.get("z", 0.0)),
+                float(item.get("v", 0.0)),
+                float(item["distance"])
             ]
-            for i in range(len(obj))
+            for item in obj
         ], dtype=float)
     else:
         obj = np.array(obj, dtype=float)
@@ -363,209 +367,3 @@ def velocity_filter(obj):
     velocity_obj = obj[valid]  
 
     return velocity_obj
-
-# 예측 위치와 현재 측정 위치가 이 거리 안에 있으면 같은 객체로 판단
-TRACK_ASSOCIATION_MAX_DISTANCE = 0.35
-
-# 몇 프레임 동안 안 보여도 track을 유지할지
-TRACK_MAX_MISSES = 5
-
-# 몇 번 이상 검출되어야 안정적인 track으로 볼지
-TRACK_MIN_HITS_TO_CONFIRM = 2
-
-
-def assign_track_ids(cluster_objects, prev_tracks, next_track_id, dt):
-    """
-    DBSCAN으로 검출된 cluster 객체들에 track_id를 부여하고,
-    각 객체 위치를 칼만필터로 보정하는 함수.
-
-    입력:
-    - cluster_objects : 현재 프레임에서 검출된 클러스터 객체 리스트
-    - prev_tracks : 이전 프레임까지 유지 중인 track 리스트
-    - next_track_id : 새 객체에 부여할 다음 ID
-    - dt : 프레임 간 시간 간격
-
-    출력:
-    - tracked_objects : 칼만필터가 적용된 현재 객체 리스트
-    - nearest_obj : 가장 가까운 추적 객체
-    - next_prev_tracks : 다음 프레임으로 넘길 track 정보
-    - next_track_id : 업데이트된 다음 ID
-    """
-
-    tracked_objects = []
-
-    # =========================
-    # 1. 기존 track들을 현재 시각으로 예측
-    # =========================
-    predicted_tracks = []
-
-    for track in prev_tracks:
-        # 이전 track의 칼만필터로 현재 위치 예측
-        state = track["kf"].predict(dt)
-
-        predicted_tracks.append({
-            "track_id": track["track_id"],
-            "kf": track["kf"],
-
-            # 예측된 위치
-            "pred_x": state["x"],
-            "pred_y": state["y"],
-
-            # track 유지용 정보
-            "miss_count": track.get("miss_count", 0),
-            "hit_count": track.get("hit_count", 1),
-        })
-
-    # 이미 매칭된 track 번호 저장
-    used_track_indices = set()
-
-    # =========================
-    # 2. 현재 cluster와 예측 track 매칭
-    # =========================
-    for obj in cluster_objects:
-        best_idx = -1
-        best_dist = float("inf")
-
-        # 현재 객체와 가장 가까운 예측 track 찾기
-        for i, track in enumerate(predicted_tracks):
-            if i in used_track_indices:
-                continue
-
-            dist = np.hypot(
-                obj["x"] - track["pred_x"],
-                obj["y"] - track["pred_y"]
-            )
-
-            if dist < best_dist:
-                best_dist = dist
-                best_idx = i
-
-        # 원본 객체 복사
-        tracked_obj = dict(obj)
-
-        # =========================
-        # 3. 기존 track과 매칭 성공
-        # =========================
-        if best_idx != -1 and best_dist <= TRACK_ASSOCIATION_MAX_DISTANCE:
-            track = predicted_tracks[best_idx]
-            used_track_indices.add(best_idx)
-
-            # 측정값으로 칼만필터 업데이트
-            state = track["kf"].update(obj["x"], obj["y"])
-
-            tracked_obj["track_id"] = track["track_id"]
-            tracked_obj["x"] = state["x"]
-            tracked_obj["y"] = state["y"]
-            tracked_obj["vx"] = state["vx"]
-            tracked_obj["vy"] = state["vy"]
-            tracked_obj["speed"] = state["speed"]
-            tracked_obj["distance"] = state["distance"]
-
-            # 검출 성공했으므로 miss 초기화
-            tracked_obj["miss_count"] = 0
-
-            # 검출 누적 횟수 증가
-            tracked_obj["hit_count"] = track["hit_count"] + 1
-
-            # 다음 프레임에서도 같은 칼만필터 사용
-            tracked_obj["kf"] = track["kf"]
-
-            # lost 상태 아님
-            tracked_obj["lost"] = False
-
-        # =========================
-        # 4. 매칭 실패 → 새 객체 생성
-        # =========================
-        else:
-            kf = KalmanFilter(dt, obj["x"], obj["y"])
-            state = kf.state_dict()
-
-            tracked_obj["track_id"] = next_track_id
-            tracked_obj["x"] = state["x"]
-            tracked_obj["y"] = state["y"]
-            tracked_obj["vx"] = state["vx"]
-            tracked_obj["vy"] = state["vy"]
-            tracked_obj["speed"] = state["speed"]
-            tracked_obj["distance"] = state["distance"]
-
-            tracked_obj["miss_count"] = 0
-            tracked_obj["hit_count"] = 1
-            tracked_obj["kf"] = kf
-            tracked_obj["lost"] = False
-
-            next_track_id += 1
-
-        tracked_objects.append(tracked_obj)
-
-    # =========================
-    # 5. 이번 프레임에서 안 잡힌 track 유지
-    # =========================
-    for i, track in enumerate(predicted_tracks):
-        if i in used_track_indices:
-            continue
-
-        miss_count = track["miss_count"] + 1
-
-        # 너무 오래 안 보이면 삭제
-        if miss_count > TRACK_MAX_MISSES:
-            continue
-
-        # 안 보인 객체도 예측 위치로 잠시 유지
-        state = track["kf"].state_dict()
-
-        lost_obj = {
-            "id": -1,
-            "track_id": track["track_id"],
-
-            "x": state["x"],
-            "y": state["y"],
-            "vx": state["vx"],
-            "vy": state["vy"],
-            "v": 0.0,
-            "speed": state["speed"],
-            "distance": state["distance"],
-
-            "miss_count": miss_count,
-            "hit_count": track["hit_count"],
-            "kf": track["kf"],
-
-            # 현재 프레임에서 실제 검출된 객체가 아니라는 표시
-            "lost": True,
-        }
-
-        tracked_objects.append(lost_obj)
-
-    # =========================
-    # 6. 다음 프레임으로 넘길 track 정보 생성
-    # =========================
-    next_prev_tracks = []
-
-    for obj in tracked_objects:
-        next_prev_tracks.append({
-            "track_id": obj["track_id"],
-            "kf": obj["kf"],
-            "miss_count": obj.get("miss_count", 0),
-            "hit_count": obj.get("hit_count", 1),
-        })
-
-    # =========================
-    # 7. 가장 가까운 객체 선택
-    # =========================
-
-    # lost 객체 제외
-    # 너무 새로 생긴 불안정한 객체 제외
-    visible_tracks = [
-        obj for obj in tracked_objects
-        if not obj.get("lost", False)
-        and obj.get("hit_count", 0) >= TRACK_MIN_HITS_TO_CONFIRM
-    ]
-
-    if len(visible_tracks) == 0:
-        nearest_obj = None
-    else:
-        nearest_obj = min(
-            visible_tracks,
-            key=lambda obj: obj["distance"]
-        )
-
-    return tracked_objects, nearest_obj, next_prev_tracks, next_track_id

@@ -67,7 +67,7 @@ def visualize_points(fig, ax, df, labels, x, y, num_detected_obj, cluster_object
 
     print(f"클러스터 수(DBSCAN): {cluster_count}, 노이즈 포인트: {noise_count}")
 
-    print(f"속도 필터 통과 객체: {len(velocity_obj)}개")
+    print(f"Velocity filter pass objects: {len(velocity_obj)}")
 
     ax.clear()
 

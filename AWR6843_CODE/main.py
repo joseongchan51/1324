@@ -1,4 +1,3 @@
-# joseongchan
 import matplotlib.pyplot as plt
 import time
 from config import build_config, DT_DEFAULT, DT_MIN, DT_MAX
@@ -69,10 +68,11 @@ def main():
                 # cluster_centroid_objects: centroid 된 좌표 , nearest_obj : centroid 중 제일 가까운 점 
                 cluster_centroid_objects = extract_clusters(filtered_points, labels)
                 
-                tracked_objects, prev_tracks, next_track_id = assign_track_ids(
+                tracked_objects, nearest_obj, prev_tracks, next_track_id = assign_track_ids(
                     cluster_centroid_objects,
                     prev_tracks,
                     next_track_id,
+                    dt
                 )
 
                 velocity_obj = velocity_filter(tracked_objects) # y축 속도 필터링된 객체들 

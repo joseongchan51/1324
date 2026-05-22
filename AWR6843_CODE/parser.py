@@ -4,35 +4,35 @@ from config import MAGIC_WORD, HEADER_LEN, MAX_PACKET_LEN
 
 
 def read_packet_buffer(data, buffer):
-    if data.in_waiting > 0:
-        buffer.extend(data.read(data.in_waiting))
+    if data.in_waiting > 0:        #읽을 데이터 확인
+        buffer.extend(data.read(data.in_waiting)) # append 쓸시 큰 상자 그대로 넣기 extned시 알맹이만 빼서 넣기
 
     if len(buffer) < HEADER_LEN:
         time.sleep(0.005)
         return None
 
-    idx = buffer.find(MAGIC_WORD)
+    idx = buffer.find(MAGIC_WORD) #매직워드
 
-    if idx == -1:
+    if idx == -1:       #magic word 못 찾음. 아직 packet 시작 못 찾음
         if len(buffer) > 5000:
-            del buffer[:-1000]
+            del buffer[:-1000]  #오래된 데이터 삭제
         return None
 
-    del buffer[:idx]
+    del buffer[:idx]    #매직워드앞에 쓰레기데이터 삭제
 
     if len(buffer) < HEADER_LEN:
         return None
 
     header = buffer[:HEADER_LEN]
-    total_packet_len = struct.unpack_from("<I", header, 12)[0]
+    total_packet_len = struct.unpack_from("<I", header, 12)[0] #전체 packet 길이를 해석
 
     if total_packet_len < HEADER_LEN or total_packet_len > MAX_PACKET_LEN:
         del buffer[:8]
-        return None
+        return None #앞 8바이트 버리고 다시 탐색 왜 8바이트? 보통 MAGIC_WORD 길이가 8바이트.
 
-    if len(buffer) < total_packet_len:
+    if len(buffer) < total_packet_len:  #헤더에서 읽은 총 길이
         time.sleep(0.005)
-        return None
+        return None 
 
     packet = bytes(buffer[:total_packet_len])
     del buffer[:total_packet_len]

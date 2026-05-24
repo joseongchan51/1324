@@ -27,6 +27,11 @@ X_RANGE = 0.5
 # [그래프 고정] 화면 좌표 범위
 VIEW_X_MIN, VIEW_X_MAX = -5.0, 5.0
 VIEW_Y_MIN, VIEW_Y_MAX = 0.0, 10.0
+# [Lane visualization] 50 cm lanes, 3 lanes, ego vehicle centered in lane 2.
+LANE_WIDTH_M = 0.5
+LANE_COUNT = 3
+EGO_LANE_INDEX = 2
+
 
 #================================================#
 # [Tracking] Track 관리 파라미터
